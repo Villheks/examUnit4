@@ -1,6 +1,7 @@
 using System;
 using System.Device.Gpio;
 using System.Diagnostics;
+using System.IO;
 using System.Threading;
 
 namespace SimonGame
@@ -19,36 +20,36 @@ namespace SimonGame
         private static bool debounceActive = false;
         private static int buttonsPressed = 0;
         private static DateTime gameStartTime;
+        private static StreamWriter logWriter;
+        private const string LogFilePath = "simon_game_log.txt";
 
         static void Main()
         {
             s_GpioController = new GpioController();
 
-            
-            int[] ledPins = { 12, 4, 15, 26 }; 
-            int[] buttonPins = { 14, 16, 2, 25 }; 
+            int[] ledPins = { 12, 4, 15, 26 };
+            int[] buttonPins = { 14, 16, 2, 25 };
 
-            
             for (int i = 0; i < 4; i++)
             {
                 leds[i] = s_GpioController.OpenPin(ledPins[i], PinMode.Output);
                 buttons[i] = s_GpioController.OpenPin(buttonPins[i], PinMode.InputPullUp);
 
-                leds[i].Write(PinValue.Low); 
+                leds[i].Write(PinValue.Low);
             }
 
-            
+            // Initialize log file
+            logWriter = new StreamWriter(LogFilePath, true); // Append mode
+
             Log("Game Started");
             gameStartTime = DateTime.UtcNow;
 
-            
             for (int i = 0; i < 4; i++)
             {
                 int buttonIndex = i;
                 buttons[i].ValueChanged += (sender, args) => Button_ValueChanged(leds[buttonIndex], args, (Color)buttonIndex);
             }
 
-            
             StartGame();
 
             Thread.Sleep(Timeout.Infinite);
@@ -59,16 +60,13 @@ namespace SimonGame
             gameOver = false;
             buttonsPressed = 0;
 
-            
             if (round == 1)
             {
-                sequence = GenerateRandomSequence(50); 
+                sequence = GenerateRandomSequence(50);
             }
 
-            
             Log($"Round {round} Started");
 
-            
             DisplaySequence(round);
         }
 
@@ -95,8 +93,7 @@ namespace SimonGame
             }
             else
             {
-                
-                sequenceIndex = 0; 
+                sequenceIndex = 0;
                 acceptingInput = true;
             }
         }
@@ -106,10 +103,9 @@ namespace SimonGame
             if (acceptingInput && e.ChangeType == PinEventTypes.Falling && !gameOver && !debounceActive)
             {
                 debounceActive = true;
-                
+
                 if (color == sequence[sequenceIndex])
                 {
-                    
                     led.Write(PinValue.High);
                     Thread.Sleep(500);
                     led.Write(PinValue.Low);
@@ -121,20 +117,19 @@ namespace SimonGame
                     int sequenceLength = round;
                     if (sequenceIndex >= sequenceLength)
                     {
-                        
-                        round++; 
+                        round++;
                         Log($"Round {round - 1} Finished. Buttons Pressed: {buttonsPressed}");
-                        StartGame(); 
+                        StartGame();
                     }
                 }
                 else
                 {
-                    
                     Log($"Button {color} Pressed - Incorrect");
                     Log("Game Over");
                     gameOver = true;
-                    OutputSummary(); 
+                    OutputSummary();
                 }
+
                 // Start debounce timer
                 Timer debounceTimer = new Timer((state) => debounceActive = false, null, 200, Timeout.Infinite);
             }
@@ -146,19 +141,21 @@ namespace SimonGame
             Color[] sequence = new Color[length];
             for (int i = 0; i < length; i++)
             {
-                sequence[i] = (Color)random.Next(4); 
+                sequence[i] = (Color)random.Next(4);
             }
             return sequence;
         }
 
         private static void Log(string message)
         {
-            
             TimeSpan elapsedTime = DateTime.UtcNow - gameStartTime;
             string elapsedTimeString = $"{elapsedTime.TotalSeconds:F0}s";
 
-            
-            Debug.WriteLine($"[{elapsedTimeString}] {message}");
+            string logMessage = $"[{elapsedTimeString}] {message}";
+
+            // Write log message to file
+            logWriter.WriteLine(logMessage);
+            logWriter.Flush(); // Ensure the message is written immediately
         }
 
         private static void OutputSummary()
@@ -166,7 +163,6 @@ namespace SimonGame
             Log($"Game Summary - Rounds Finished: {round - 1}, Buttons Pressed: {buttonsPressed}");
         }
 
-        
         private enum Color
         {
             Blue,

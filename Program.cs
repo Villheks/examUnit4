@@ -1,94 +1,178 @@
-﻿
+using System;
+using System.Device.Gpio;
+using System.Diagnostics;
+using System.Threading;
 
-class Button {
-    public string Color { get; set; }
-    public Button(string color) {
-        Color = color;
-    }
-}
+namespace SimonGame
+{
+    class Program
+    {
+        private static GpioController s_GpioController;
+        private static GpioPin[] leds = new GpioPin[4];
+        private static GpioPin[] buttons = new GpioPin[4];
+        private static Color[] sequence;
+        private static int sequenceIndex = 0;
+        private static Timer timer;
+        private static bool acceptingInput = false;
+        private static int round = 1;
+        private static bool gameOver = false;
+        private static bool debounceActive = false;
+        private static int buttonsPressed = 0;
+        private static DateTime gameStartTime;
 
-class Game {
-    private List<Button> buttons;
-    private Random random;
-    private int difficultyLevel;
-    private int sequenceLength;
-    
-    public Game(int difficultyLevel) {
-        buttons = new List<Button>();
-        buttons.Add(new Button("Red"));
-        buttons.Add(new Button("Green"));
-        buttons.Add(new Button("Blue"));
-        buttons.Add(new Button("Yellow"));
-        random = new Random();
-        this.difficultyLevel = difficultyLevel;
-        sequenceLength = 4 + (difficultyLevel * 2); 
-    }
+        static void Main()
+        {
+            s_GpioController = new GpioController();
 
-    public void Start() {
-        Console.WriteLine("Welcome to the Sequence Recall Game!");
-        Console.WriteLine($"Difficulty Level: {difficultyLevel}");
-        Console.WriteLine("Remember the sequence and press the buttons in the correct order.");
+            
+            int[] ledPins = { 12, 4, 15, 26 }; 
+            int[] buttonPins = { 14, 16, 2, 25 }; 
 
-        List<Button> sequence = GenerateSequence();
-        DisplaySequence(sequence);
+            
+            for (int i = 0; i < 4; i++)
+            {
+                leds[i] = s_GpioController.OpenPin(ledPins[i], PinMode.Output);
+                buttons[i] = s_GpioController.OpenPin(buttonPins[i], PinMode.InputPullUp);
 
-        bool success = TakeUserInput(sequence);
-        if (success) {
-            Console.WriteLine("Congratulations! You remembered the sequence.");
-        } else {
-            Console.WriteLine("Sorry, you missed the sequence. Better luck next time!");
+                leds[i].Write(PinValue.Low); 
+            }
+
+            
+            Log("Game Started");
+            gameStartTime = DateTime.UtcNow;
+
+            
+            for (int i = 0; i < 4; i++)
+            {
+                int buttonIndex = i;
+                buttons[i].ValueChanged += (sender, args) => Button_ValueChanged(leds[buttonIndex], args, (Color)buttonIndex);
+            }
+
+            
+            StartGame();
+
+            Thread.Sleep(Timeout.Infinite);
         }
-    }
 
-    private List<Button> GenerateSequence() {
-        List<Button> sequence = new List<Button>();
-        for (int i = 0; i < sequenceLength; i++) {
-            int randomIndex = random.Next(0, buttons.Count);
-            sequence.Add(buttons[randomIndex]);
+        private static void StartGame()
+        {
+            gameOver = false;
+            buttonsPressed = 0;
+
+            
+            if (round == 1)
+            {
+                sequence = GenerateRandomSequence(50); 
+            }
+
+            
+            Log($"Round {round} Started");
+
+            
+            DisplaySequence(round);
         }
-        return sequence;
-    }
 
-    private void DisplaySequence(List<Button> sequence) {
-        foreach (Button button in sequence) {
-            Console.BackgroundColor = ConsoleColor.White;
-            Console.ForegroundColor = ConsoleColor.Black;
-            Console.Write($"{button.Color} ");
-            Thread.Sleep(1000); 
-            Console.ResetColor();
-            Thread.Sleep(500); 
+        private static void DisplaySequence(int round)
+        {
+            sequenceIndex = 0;
+            acceptingInput = false;
+
+            timer = new Timer(TurnNextLedOn, round, 1000, Timeout.Infinite);
         }
-        Console.WriteLine();
-    }
 
-    private bool TakeUserInput(List<Button> sequence) {
-        Console.WriteLine("Enter the sequence:");
-        for (int i = 0; i < sequence.Count; i++) {
-            string input = Console.ReadLine().Trim().ToLower();
-            if (input != sequence[i].Color.ToLower()) {
-                return false;
+        private static void TurnNextLedOn(object state)
+        {
+            int currentRound = (int)state;
+            int sequenceLength = currentRound;
+
+            if (sequenceIndex < sequenceLength)
+            {
+                leds[(int)sequence[sequenceIndex]].Write(PinValue.High);
+                Thread.Sleep(1000);
+                leds[(int)sequence[sequenceIndex]].Write(PinValue.Low);
+                sequenceIndex++;
+                timer.Change(1000, Timeout.Infinite);
+            }
+            else
+            {
+                
+                sequenceIndex = 0; 
+                acceptingInput = true;
             }
         }
-        return true;
-    }
-}
 
-class Program {
-    static void Main(string[] args) {
-        Console.WriteLine("Please enter your age:");
-        int age = int.Parse(Console.ReadLine());
+        private static void Button_ValueChanged(GpioPin led, PinValueChangedEventArgs e, Color color)
+        {
+            if (acceptingInput && e.ChangeType == PinEventTypes.Falling && !gameOver && !debounceActive)
+            {
+                debounceActive = true;
+                
+                if (color == sequence[sequenceIndex])
+                {
+                    
+                    led.Write(PinValue.High);
+                    Thread.Sleep(500);
+                    led.Write(PinValue.Low);
+                    sequenceIndex++;
 
-        
-        int difficultyLevel = 0;
-        if (age >= 13 && age < 16) {
-            difficultyLevel = 1;
-        } else if (age >= 16 && age < 18) {
-            difficultyLevel = 2;
-        } else if (age >= 18) {
-            difficultyLevel = 3;
+                    Log($"Button {color} Pressed - Correct");
+                    buttonsPressed++;
+
+                    int sequenceLength = round;
+                    if (sequenceIndex >= sequenceLength)
+                    {
+                        
+                        round++; 
+                        Log($"Round {round - 1} Finished. Buttons Pressed: {buttonsPressed}");
+                        StartGame(); 
+                    }
+                }
+                else
+                {
+                    
+                    Log($"Button {color} Pressed - Incorrect");
+                    Log("Game Over");
+                    gameOver = true;
+                    OutputSummary(); 
+                }
+                // Start debounce timer
+                Timer debounceTimer = new Timer((state) => debounceActive = false, null, 200, Timeout.Infinite);
+            }
         }
 
-        Game game = new Game(difficultyLevel);
-        game.Start();
+        private static Color[] GenerateRandomSequence(int length)
+        {
+            Random random = new Random();
+            Color[] sequence = new Color[length];
+            for (int i = 0; i < length; i++)
+            {
+                sequence[i] = (Color)random.Next(4); 
+            }
+            return sequence;
+        }
+
+        private static void Log(string message)
+        {
+            
+            TimeSpan elapsedTime = DateTime.UtcNow - gameStartTime;
+            string elapsedTimeString = $"{elapsedTime.TotalSeconds:F0}s";
+
+            
+            Debug.WriteLine($"[{elapsedTimeString}] {message}");
+        }
+
+        private static void OutputSummary()
+        {
+            Log($"Game Summary - Rounds Finished: {round - 1}, Buttons Pressed: {buttonsPressed}");
+        }
+
+        
+        private enum Color
+        {
+            Blue,
+            Red,
+            Yellow,
+            Green
+        }
     }
 }

@@ -38,8 +38,8 @@ namespace SimonGame
                 leds[i].Write(PinValue.Low);
             }
 
-            // Initialize log file
-            logWriter = new StreamWriter(LogFilePath, true); // Append mode
+            
+            logWriter = new StreamWriter(LogFilePath, true); 
 
             Log("Game Started");
             gameStartTime = DateTime.UtcNow;
@@ -130,7 +130,7 @@ namespace SimonGame
                     OutputSummary();
                 }
 
-                // Start debounce timer
+                
                 Timer debounceTimer = new Timer((state) => debounceActive = false, null, 200, Timeout.Infinite);
             }
         }
@@ -153,9 +153,9 @@ namespace SimonGame
 
             string logMessage = $"[{elapsedTimeString}] {message}";
 
-            // Write log message to file
+            
             logWriter.WriteLine(logMessage);
-            logWriter.Flush(); // Ensure the message is written immediately
+            logWriter.Flush(); 
         }
 
         private static void OutputSummary()
